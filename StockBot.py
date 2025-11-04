@@ -6,8 +6,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # === CONFIG ===
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-CHAT_ID = YOUR_CHAT_ID  # e.g. 123456789
+BOT_TOKEN = "8348974790:AAGGlVyv466tvWvPx6OeidqNfgJ6DFKSw68"
+CHAT_ID = 474648878  # e.g. 123456789
 
 STOCKS = {
     "NVDA": {"upper": 130.0, "lower": 110.0, "pct_trigger": 2.0},
