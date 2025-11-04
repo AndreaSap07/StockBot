@@ -4,10 +4,12 @@ import yfinance as yf
 from datetime import date, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+
 
 # === CONFIG ===
-BOT_TOKEN = "8348974790:AAGGlVyv466tvWvPx6OeidqNfgJ6DFKSw68"
-CHAT_ID = 474648878  # e.g. 123456789
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = int(os.getenv("CHAT_ID"))
 
 STOCKS = {
     "NVDA": {"upper": 130.0, "lower": 110.0, "pct_trigger": 2.0},
