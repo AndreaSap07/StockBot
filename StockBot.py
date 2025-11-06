@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
+import matplotlib.pyplot as plt
+import io
 
 
 
@@ -92,6 +94,16 @@ def generate_full_report():
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_full_report(), parse_mode="Markdown")
 
+async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /chart SYMBOL\nExample: /chart NVDA")
+        return
+
+    symbol = context.args[0].upper()
+    await send_stock_chart(symbol, update.message.chat_id)
+
+app.add_handler(CommandHandler("chart", chart))
+
 
 # === BACKGROUND THREAD FOR PRICE CHECKING ===
 def monitor_prices(bot):
@@ -133,6 +145,34 @@ def monitor_prices(bot):
             print("Error in monitor thread:", e)
 
         time.sleep(CHECK_INTERVAL)
+
+async def send_stock_chart(symbol: str, chat_id: str):
+    data = yf.download(symbol, period="6mo", interval="1d")  # last 6 months
+    if data.empty:
+        await bot.send_message(chat_id, f"⚠️ No data available for {symbol}")
+        return
+
+    prices = data['Close']
+    ma20 = prices.rolling(window=20).mean()
+    ma50 = prices.rolling(window=50).mean()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(prices.index, prices.values, label="Close Price")
+    plt.plot(ma20.index, ma20.values, label="20-Day MA")
+    plt.plot(ma50.index, ma50.values, label="50-Day MA")
+    plt.title(f"{symbol} Price (Last 6 Months)")
+    plt.xlabel("Date")
+    plt.ylabel("Price ($)")
+    plt.legend()
+    plt.grid(True)
+
+
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    plt.close()
+
+    await bot.send_photo(chat_id=chat_id, photo=buffer)
 
 
 # === MAIN ===
