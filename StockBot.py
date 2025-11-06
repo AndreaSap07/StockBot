@@ -154,37 +154,36 @@ def monitor_prices(bot):
         time.sleep(CHECK_INTERVAL)
 
 def create_chart_bytes(symbol: str, period: str = "6mo", interval: str = "1d") -> bytes:
-    """
-    Blocking function that downloads data and returns PNG bytes.
-    Intended to be called inside asyncio.to_thread().
-    """
-    data = yf.download(symbol, period=period, interval=interval, progress=False)
+    data = yf.download(symbol, period=period, interval=interval, auto_adjust=False, progress=False)
     if data.empty:
-        raise ValueError(f"No data for {symbol}")
+        raise ValueError(f"No data found for {symbol}")
 
     prices = data["Close"]
 
     plt.figure(figsize=(10, 5))
-    plt.plot(prices.index, prices.values, label="Close")
+    plt.plot(prices.index, prices.values, label="Close Price")
+
+    # Moving Averages
+    ma20 = prices.rolling(window=20).mean()
+    ma50 = prices.rolling(window=50).mean()
+
+    if ma20.notna().any():
+        plt.plot(ma20.index, ma20.values, label="20-Day MA")
+
+    if ma50.notna().any():
+        plt.plot(ma50.index, ma50.values, label="50-Day MA")
+
     plt.title(f"{symbol} Price ({period})")
     plt.xlabel("Date")
     plt.ylabel("Price ($)")
-    plt.grid(True)
-
-    # optional: moving averages
-    ma20 = prices.rolling(window=20).mean()
-    ma50 = prices.rolling(window=50).mean()
-    if not ma20.isna().all():
-        plt.plot(ma20.index, ma20.values, label="20-day MA")
-    if not ma50.isna().all():
-        plt.plot(ma50.index, ma50.values, label="50-day MA")
     plt.legend()
+    plt.grid(True)
 
     buf = io.BytesIO()
     plt.savefig(buf, format="png", bbox_inches="tight")
     plt.close()
     buf.seek(0)
-    return buf.read()   # return bytes
+    return buf.read()
 
 
 async def send_stock_chart_async(symbol: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE):
