@@ -100,7 +100,7 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     symbol = context.args[0].upper()
-    await send_stock_chart(symbol, update.message.chat_id)
+    await send_stock_chart(symbol, update.message.chat_id, bot)
 
 
 
@@ -145,7 +145,7 @@ def monitor_prices(bot):
 
         time.sleep(CHECK_INTERVAL)
 
-async def send_stock_chart(symbol: str, chat_id: str):
+async def send_stock_chart(symbol: str, chat_id: str, bot):
     data = yf.download(symbol, period="6mo", interval="1d")  # last 6 months
     if data.empty:
         await bot.send_message(chat_id, f"⚠️ No data available for {symbol}")
