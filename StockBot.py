@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
+import matplotlib
+matplotlib.use("Agg")   # important on headless servers
 import matplotlib.pyplot as plt
 import io
 
@@ -94,13 +96,17 @@ def generate_full_report():
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_full_report(), parse_mode="Markdown")
 
-async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Usage: /chart NVDA"""
     if not context.args:
         await update.message.reply_text("Usage: /chart SYMBOL\nExample: /chart NVDA")
         return
 
     symbol = context.args[0].upper()
-    await send_stock_chart(symbol, update.message.chat_id, bot)
+    chat_id = update.effective_chat.id
+    # Run the chart generator and send it (non-blocking)
+    await send_stock_chart_async(symbol, chat_id, context)
+
 
 
 
@@ -145,33 +151,58 @@ def monitor_prices(bot):
 
         time.sleep(CHECK_INTERVAL)
 
-async def send_stock_chart(symbol: str, chat_id: str, bot):
-    data = yf.download(symbol, period="6mo", interval="1d")  # last 6 months
+def create_chart_bytes(symbol: str, period: str = "6mo", interval: str = "1d") -> bytes:
+    """
+    Blocking function that downloads data and returns PNG bytes.
+    Intended to be called inside asyncio.to_thread().
+    """
+    data = yf.download(symbol, period=period, interval=interval, progress=False)
     if data.empty:
-        await bot.send_message(chat_id, f"⚠️ No data available for {symbol}")
-        return
+        raise ValueError(f"No data for {symbol}")
 
-    prices = data['Close']
-    ma20 = prices.rolling(window=20).mean()
-    ma50 = prices.rolling(window=50).mean()
+    prices = data["Close"]
 
     plt.figure(figsize=(10, 5))
-    plt.plot(prices.index, prices.values, label="Close Price")
-    plt.plot(ma20.index, ma20.values, label="20-Day MA")
-    plt.plot(ma50.index, ma50.values, label="50-Day MA")
-    plt.title(f"{symbol} Price (Last 6 Months)")
+    plt.plot(prices.index, prices.values, label="Close")
+    plt.title(f"{symbol} Price ({period})")
     plt.xlabel("Date")
     plt.ylabel("Price ($)")
-    plt.legend()
     plt.grid(True)
 
+    # optional: moving averages
+    ma20 = prices.rolling(window=20).mean()
+    ma50 = prices.rolling(window=50).mean()
+    if not ma20.isna().all():
+        plt.plot(ma20.index, ma20.values, label="20-day MA")
+    if not ma50.isna().all():
+        plt.plot(ma50.index, ma50.values, label="50-day MA")
+    plt.legend()
 
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format='png')
-    buffer.seek(0)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
     plt.close()
+    buf.seek(0)
+    return buf.read()   # return bytes
 
-    await bot.send_photo(chat_id=chat_id, photo=buffer)
+
+async def send_stock_chart_async(symbol: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Async wrapper that runs plotting in a thread and sends the photo.
+    """
+    try:
+        png_bytes = await asyncio.to_thread(create_chart_bytes, symbol, "6mo", "1d")
+    except ValueError as e:
+        # no data
+        await context.bot.send_message(chat_id=chat_id, text=str(e))
+        return
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"Error creating chart: {e}")
+        return
+
+    bio = io.BytesIO(png_bytes)
+    bio.name = f"{symbol}.png"
+    bio.seek(0)
+    await context.bot.send_photo(chat_id=chat_id, photo=bio)
 
 
 # === MAIN ===
@@ -180,7 +211,7 @@ def main():
 
     # Add command
     app.add_handler(CommandHandler("report", report_command))
-    app.add_handler(CommandHandler("chart", chart))
+    app.add_handler(CommandHandler("chart", chart_command))
 
 
     # Start background monitoring thread
