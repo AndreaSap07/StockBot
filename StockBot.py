@@ -102,7 +102,6 @@ async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     symbol = context.args[0].upper()
     await send_stock_chart(symbol, update.message.chat_id)
 
-app.add_handler(CommandHandler("chart", chart))
 
 
 # === BACKGROUND THREAD FOR PRICE CHECKING ===
@@ -181,6 +180,8 @@ def main():
 
     # Add command
     app.add_handler(CommandHandler("report", report_command))
+    app.add_handler(CommandHandler("chart", chart))
+
 
     # Start background monitoring thread
     bot = app.bot
