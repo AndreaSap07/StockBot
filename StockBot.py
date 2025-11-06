@@ -15,8 +15,11 @@ import asyncio
 
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
+#BOT_TOKEN = os.getenv("BOT_TOKEN")
+#CHAT_ID = int(os.getenv("CHAT_ID"))
+
+BOT_TOKEN = "8348974790:AAGGlVyv466tvWvPx6OeidqNfgJ6DFKSw68"
+CHAT_ID = 474648878
 
 STOCKS = {
     "NVDA": {"upper": 130.0, "lower": 110.0, "pct_trigger": 2.0},
@@ -47,8 +50,9 @@ def get_prev_close(symbol):
 
 
 def pct_change(now, then):
-    return ((now - then) / then * 100) if (now and then) else None
-
+    if now is None or then is None:
+        return None
+    return (now - then) / then * 100
 
 # === REPORTING ===
 def get_stock_report(symbol):
@@ -57,10 +61,16 @@ def get_stock_report(symbol):
 
     def get_price_on(days_ago):
         d = today - timedelta(days=days_ago)
-        hist = ticker.history(start=d - timedelta(days=1), end=d)
-        if len(hist) == 0:
+        hist = ticker.history(start=d - timedelta(days=3), end=d + timedelta(days=1))
+
+        if hist.empty:
             return None
-        return hist["Close"].iloc[-1]
+
+        # Always get the last valid closing price
+        value = hist["Close"].dropna().iloc[-1]
+
+        return float(value)
+
 
     prices = {
         "today": get_price_on(0),
@@ -98,15 +108,14 @@ def generate_full_report():
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(generate_full_report(), parse_mode="Markdown")
 
-async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Usage: /chart NVDA"""
+async def chart_command(update, context):
     if not context.args:
         await update.message.reply_text("Usage: /chart SYMBOL\nExample: /chart NVDA")
         return
 
     symbol = context.args[0].upper()
     chat_id = update.effective_chat.id
-    # Run the chart generator and send it (non-blocking)
+
     await send_stock_chart_async(symbol, chat_id, context)
 
 
@@ -154,23 +163,31 @@ def monitor_prices(bot):
         time.sleep(CHECK_INTERVAL)
 
 def create_chart_bytes(symbol: str, period: str = "6mo", interval: str = "1d") -> bytes:
-    data = yf.download(symbol, period=period, interval=interval, auto_adjust=False, progress=False)
+    data = yf.download(
+        symbol,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False
+    )
+
     if data.empty:
         raise ValueError(f"No data found for {symbol}")
 
-    prices = data["Close"]
+    # ✅ Guarantee Series (not DataFrame)
+    prices = data["Close"].astype(float).squeeze()
+
+    # Moving averages
+    ma20 = prices.rolling(20).mean()
+    ma50 = prices.rolling(50).mean()
 
     plt.figure(figsize=(10, 5))
     plt.plot(prices.index, prices.values, label="Close Price")
 
-    # Moving Averages
-    ma20 = prices.rolling(window=20).mean()
-    ma50 = prices.rolling(window=50).mean()
-
-    if ma20.notna().any():
+    if ma20.notna().sum() > 5:
         plt.plot(ma20.index, ma20.values, label="20-Day MA")
 
-    if ma50.notna().any():
+    if ma50.notna().sum() > 5:
         plt.plot(ma50.index, ma50.values, label="50-Day MA")
 
     plt.title(f"{symbol} Price ({period})")
@@ -179,31 +196,29 @@ def create_chart_bytes(symbol: str, period: str = "6mo", interval: str = "1d") -
     plt.legend()
     plt.grid(True)
 
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", bbox_inches="tight")
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format="png", bbox_inches="tight")
     plt.close()
-    buf.seek(0)
-    return buf.read()
+    buffer.seek(0)
+    return buffer.read()
 
 
-async def send_stock_chart_async(symbol: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Async wrapper that runs plotting in a thread and sends the photo.
-    """
+
+
+async def send_stock_chart_async(symbol: str, chat_id: int, context):
     try:
-        png_bytes = await asyncio.to_thread(create_chart_bytes, symbol, "6mo", "1d")
-    except ValueError as e:
-        # no data
-        await context.bot.send_message(chat_id=chat_id, text=str(e))
-        return
+        png_bytes = await asyncio.to_thread(create_chart_bytes, symbol)
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"Error creating chart: {e}")
+        await context.bot.send_message(chat_id, f"⚠️ {e}")
         return
 
-    bio = io.BytesIO(png_bytes)
-    bio.name = f"{symbol}.png"
-    bio.seek(0)
-    await context.bot.send_photo(chat_id=chat_id, photo=bio)
+    file = io.BytesIO(png_bytes)
+    file.name = f"{symbol}.png"
+    await context.bot.send_photo(chat_id, photo=file)
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    print("\n--- ERROR DETECTED ---")
+    print(context.error)
 
 
 # === MAIN ===
@@ -213,6 +228,8 @@ def main():
     # Add command
     app.add_handler(CommandHandler("report", report_command))
     app.add_handler(CommandHandler("chart", chart_command))
+    app.add_error_handler(error_handler)
+
 
 
     # Start background monitoring thread
